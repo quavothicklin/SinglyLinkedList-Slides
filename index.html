@@ -1,0 +1,1821 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Linked Slides — Singly Linked List Visualizer</title>
+  
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            cream: {
+              50: '#FDFBF7',
+              100: '#FAF8F5',
+              200: '#F4EFEA',
+              300: '#EBE3D8',
+              400: '#DDD2C3',
+              500: '#C2B4A2',
+            },
+            editorial: {
+              bg: '#FAF8F5',
+              surface: '#FFFFFF',
+              card: '#F6F2EC',
+              border: '#E5DFD5',
+              borderDark: '#D4CBBF',
+              text: '#1F1D1B',
+              muted: '#6B655C',
+              subtle: '#999083',
+            },
+            sunshine: {
+              50: '#FFFBEB',
+              100: '#FEF3C7',
+              200: '#FDE68A',
+              300: '#FCD34D',
+              400: '#FBBF24',
+              500: '#F59E0B',
+              600: '#D97706',
+              700: '#B45309',
+            },
+            terracotta: {
+              500: '#C2410C',
+              100: '#FFEDD5',
+            }
+          },
+          fontFamily: {
+            serif: ['Instrument Serif', 'Georgia', 'serif'],
+            sans: ['Plus Jakarta Sans', 'Inter', '-apple-system', 'sans-serif'],
+          }
+        }
+      }
+    }
+  </script>
+
+  <!-- Google Fonts for Editorial Typography -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Plus+Jakarta+Sans:ital,wght@0,400;0,500;0,600;0,700;1,400&display=swap" rel="stylesheet">
+
+  <!-- React & Babel CDNs -->
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+  <style>
+    body {
+      background-color: #FAF8F5;
+      color: #1F1D1B;
+      font-family: 'Plus Jakarta Sans', sans-serif;
+      overflow-x: hidden;
+    }
+    .font-serif-editorial {
+      font-family: 'Instrument Serif', Georgia, serif;
+    }
+    /* Custom subtle scrollbars */
+    ::-webkit-scrollbar {
+      width: 6px;
+      height: 6px;
+    }
+    ::-webkit-scrollbar-track {
+      background: #F4EFEA;
+    }
+    ::-webkit-scrollbar-thumb {
+      background: #DDD2C3;
+      border-radius: 9999px;
+    }
+    ::-webkit-scrollbar-thumb:hover {
+      background: #C2B4A2;
+    }
+    /* Glowing active node aura */
+    .curr-node-glow {
+      box-shadow: 0 0 0 3px #F59E0B, 0 10px 25px -5px rgba(245, 158, 11, 0.25);
+    }
+    /* Smooth transitions for node animations */
+    .node-transition {
+      transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+    /* Slide view animation */
+    .slide-fade-enter {
+      animation: slideIn 0.35s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+    }
+    @keyframes slideIn {
+      from {
+        opacity: 0;
+        transform: translateY(8px) scale(0.99);
+      }
+      to {
+        opacity: 1;
+        transform: translateY(0) scale(1);
+      }
+    }
+  </style>
+</head>
+<body class="min-h-screen flex flex-col antialiased selection:bg-sunshine-200 selection:text-editorial-text">
+  <div id="root"></div>
+
+  <script type="text/babel">
+    const { useState, useEffect, useRef, useCallback, useMemo } = React;
+
+    // --- SOUND SYNTHESIZER ENGINE (Web Audio API) ---
+    class SoundEngine {
+      constructor() {
+        this.ctx = null;
+        this.enabled = true;
+      }
+
+      init() {
+        if (!this.ctx) {
+          const AudioContext = window.AudioContext || window.webkitAudioContext;
+          if (AudioContext) {
+            this.ctx = new AudioContext();
+          }
+        }
+        if (this.ctx && this.ctx.state === 'suspended') {
+          this.ctx.resume();
+        }
+      }
+
+      playClick() {
+        if (!this.enabled) return;
+        this.init();
+        if (!this.ctx) return;
+        try {
+          const osc = this.ctx.createOscillator();
+          const gain = this.ctx.createGain();
+          osc.type = 'sine';
+          osc.frequency.setValueAtTime(600, this.ctx.currentTime);
+          osc.frequency.exponentialRampToValueAtTime(200, this.ctx.currentTime + 0.04);
+          gain.gain.setValueAtTime(0.08, this.ctx.currentTime);
+          gain.gain.exponentialRampToValueAtTime(0.001, this.ctx.currentTime + 0.04);
+          osc.connect(gain);
+          gain.connect(this.ctx.destination);
+          osc.start();
+          osc.stop(this.ctx.currentTime + 0.04);
+        } catch(e){}
+      }
+
+      playStep(index = 0) {
+        if (!this.enabled) return;
+        this.init();
+        if (!this.ctx) return;
+        try {
+          const baseFreq = 320;
+          const freq = baseFreq * Math.pow(1.05946, index % 12);
+          const osc = this.ctx.createOscillator();
+          const gain = this.ctx.createGain();
+          osc.type = 'triangle';
+          osc.frequency.setValueAtTime(freq, this.ctx.currentTime);
+          gain.gain.setValueAtTime(0.12, this.ctx.currentTime);
+          gain.gain.exponentialRampToValueAtTime(0.001, this.ctx.currentTime + 0.12);
+          osc.connect(gain);
+          gain.connect(this.ctx.destination);
+          osc.start();
+          osc.stop(this.ctx.currentTime + 0.12);
+        } catch(e){}
+      }
+
+      playInsert() {
+        if (!this.enabled) return;
+        this.init();
+        if (!this.ctx) return;
+        try {
+          const freqs = [329.63, 415.30, 493.88]; // Warm E major chord
+          freqs.forEach((f, i) => {
+            const osc = this.ctx.createOscillator();
+            const gain = this.ctx.createGain();
+            osc.type = 'sine';
+            osc.frequency.setValueAtTime(f, this.ctx.currentTime + i * 0.04);
+            gain.gain.setValueAtTime(0.08, this.ctx.currentTime + i * 0.04);
+            gain.gain.exponentialRampToValueAtTime(0.001, this.ctx.currentTime + i * 0.04 + 0.25);
+            osc.connect(gain);
+            gain.connect(this.ctx.destination);
+            osc.start(this.ctx.currentTime + i * 0.04);
+            osc.stop(this.ctx.currentTime + i * 0.04 + 0.25);
+          });
+        } catch(e){}
+      }
+
+      playDelete() {
+        if (!this.enabled) return;
+        this.init();
+        if (!this.ctx) return;
+        try {
+          const osc = this.ctx.createOscillator();
+          const gain = this.ctx.createGain();
+          osc.type = 'sine';
+          osc.frequency.setValueAtTime(450, this.ctx.currentTime);
+          osc.frequency.exponentialRampToValueAtTime(180, this.ctx.currentTime + 0.2);
+          gain.gain.setValueAtTime(0.1, this.ctx.currentTime);
+          gain.gain.exponentialRampToValueAtTime(0.001, this.ctx.currentTime + 0.2);
+          osc.connect(gain);
+          gain.connect(this.ctx.destination);
+          osc.start();
+          osc.stop(this.ctx.currentTime + 0.2);
+        } catch(e){}
+      }
+
+      playWarning() {
+        if (!this.enabled) return;
+        this.init();
+        if (!this.ctx) return;
+        try {
+          const osc = this.ctx.createOscillator();
+          const gain = this.ctx.createGain();
+          osc.type = 'sawtooth';
+          osc.frequency.setValueAtTime(150, this.ctx.currentTime);
+          osc.frequency.setValueAtTime(120, this.ctx.currentTime + 0.1);
+          gain.gain.setValueAtTime(0.12, this.ctx.currentTime);
+          gain.gain.exponentialRampToValueAtTime(0.001, this.ctx.currentTime + 0.25);
+          osc.connect(gain);
+          gain.connect(this.ctx.destination);
+          osc.start();
+          osc.stop(this.ctx.currentTime + 0.25);
+        } catch(e){}
+      }
+    }
+
+    const audio = new SoundEngine();
+
+    // Helper: generate realistic 16-bit hex memory addresses
+    const genAddress = () => '0x' + Math.floor(0x1000 + Math.random() * 0xEFF0).toString(16).toUpperCase();
+
+    // --- INITIAL DATASET ---
+    const INITIAL_SLIDES = [
+      {
+        id: 'node-1',
+        address: '0x1A40',
+        title: 'Introduction to Linked Slides',
+        subtitle: 'A Modern Singly Linked List Presentation Engine',
+        bullets: [
+          'Each slide is stored as a discrete Node in heap memory.',
+          'Nodes contain slide layout payload and a single `next` pointer.',
+          'Sequential node access only — backward traversal requires `prev` pointers.'
+        ],
+        layout: 'title',
+        color: 'amber'
+      },
+      {
+        id: 'node-2',
+        address: '0x2B8D',
+        title: 'Constant Time O(1) Head & Tail',
+        subtitle: 'Direct Reference Directives',
+        bullets: [
+          'Adding at HEAD takes O(1) by updating head reference pointer.',
+          'Adding at TAIL takes O(1) thanks to explicit persistent tail pointer.',
+          'No full list iteration required for boundary insertions.'
+        ],
+        layout: 'standard',
+        color: 'charcoal'
+      },
+      {
+        id: 'node-3',
+        address: '0x3F91',
+        title: 'Linear O(n) Traversal & Search',
+        subtitle: 'Sequential Pointer Traversal Model',
+        bullets: [
+          'Random indexing (like array[i]) is NOT supported in linked lists.',
+          'Accessing element at index k requires k sequential next hops.',
+          'Removing tail requires O(n) traversal to locate size-2 node!'
+        ],
+        layout: 'quote',
+        color: 'terracotta'
+      },
+      {
+        id: 'node-4',
+        address: '0x4E02',
+        title: 'Presenter Mode Restrictions',
+        subtitle: 'Why Backward Navigation Is Blocked',
+        bullets: [
+          'Singly Linked Lists store ONLY forward `next` pointers.',
+          'Attempting to press Left Arrow triggers an educational warning.',
+          'To traverse backward seamlessly, upgrade to a Doubly Linked List.'
+        ],
+        layout: 'standard',
+        color: 'sage'
+      }
+    ];
+
+    // --- SVG ICON COMPONENTS ---
+    const IconPlay = () => <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>;
+    const IconPause = () => <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/></svg>;
+    const IconStepForward = () => <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path d="M13 5l7 7-7 7M5 5l7 7-7 7"/></svg>;
+    const IconStepBack = () => <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path d="M11 19l-7-7 7-7M19 19l-7-7 7-7"/></svg>;
+    const IconPlus = () => <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>;
+    const IconTrash = () => <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>;
+    const IconEdit = () => <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>;
+    const IconPresenter = () => <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path d="M7 4v16M17 4v16M3 8h18M3 16h18"/></svg>;
+    const IconVolume = () => <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path d="M11 5L6 9H2v6h4l5 4V5zM15.54 8.46a5 5 0 010 7.07"/></svg>;
+    const IconVolumeMute = () => <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path d="M11 5L6 9H2v6h4l5 4V5zM23 9l-6 6M17 9l6 6"/></svg>;
+    const IconZap = () => <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>;
+    const IconArrowRight = () => <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path d="M14 5l7 7-7 7M3 12h18"/></svg>;
+    const IconArrowLeft = () => <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path d="M10 19l-7-7 7-7M21 12H3"/></svg>;
+    const IconInfo = () => <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></svg>;
+    const IconX = () => <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path d="M18 6L6 18M6 6l12 12"/></svg>;
+    const IconLayers = () => <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/></svg>;
+    const IconLock = () => <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg>;
+
+    // --- MAIN APP COMPONENT ---
+    function LinkedSlidesApp() {
+      // List State (Array representation of the linked list node sequence)
+      const [slides, setSlides] = useState(INITIAL_SLIDES);
+      const [currId, setCurrId] = useState(INITIAL_SLIDES[0]?.id || null);
+
+      // Presenter Mode State
+      const [isPresenter, setIsPresenter] = useState(false);
+      const [warningToast, setWarningToast] = useState(null);
+
+      // Algorithmic Traversal / Animation State
+      const [algoSteps, setAlgoSteps] = useState([]);
+      const [currentStepIdx, setCurrentStepIdx] = useState(0);
+      const [isPlaying, setIsPlaying] = useState(false);
+      const [playbackSpeed, setPlaybackSpeed] = useState(1); // 0.5x, 1x, 2x, 4x
+
+      // Audio Mute state
+      const [soundEnabled, setSoundEnabled] = useState(true);
+
+      // Modals
+      const [isInsertModalOpen, setIsInsertModalOpen] = useState(false);
+      const [isEditModalOpen, setIsEditModalOpen] = useState(false);
+      const [insertPos, setInsertPos] = useState('tail'); // 'head', 'tail', 'pos'
+      const [customPosInput, setCustomPosInput] = useState(1);
+
+      // Slide Form State
+      const [slideFormData, setSlideFormData] = useState({
+        title: '',
+        subtitle: '',
+        bulletsStr: '',
+        layout: 'standard',
+        color: 'amber'
+      });
+
+      // Synchronize audio engine mute state
+      useEffect(() => {
+        audio.enabled = soundEnabled;
+      }, [soundEnabled]);
+
+      // Derived head, tail, active index
+      const headSlide = slides[0] || null;
+      const tailSlide = slides[slides.length - 1] || null;
+      const activeIndex = slides.findIndex(s => s.id === currId);
+      const activeSlide = slides[activeIndex] || headSlide || null;
+
+      // Active algorithmic step
+      const currentStep = algoSteps[currentStepIdx] || null;
+
+      // --- ALGORITHMIC STEP GENERATORS ---
+      const triggerAlgorithm = (steps, onCompleteListUpdate = null) => {
+        setIsPlaying(false);
+        setAlgoSteps(steps);
+        setCurrentStepIdx(0);
+        
+        if (steps.length > 0) {
+          const firstStep = steps[0];
+          if (firstStep.activeId) setCurrId(firstStep.activeId);
+        }
+
+        // Auto play sequence
+        setIsPlaying(true);
+
+        // Save delayed final action if provided
+        window._pendingListUpdate = onCompleteListUpdate;
+      };
+
+      // Playback Step Timer
+      useEffect(() => {
+        let timer = null;
+        if (isPlaying && algoSteps.length > 0) {
+          const intervalMs = 1200 / playbackSpeed;
+          timer = setInterval(() => {
+            setCurrentStepIdx(prev => {
+              if (prev < algoSteps.length - 1) {
+                const nextIdx = prev + 1;
+                const step = algoSteps[nextIdx];
+                if (step.activeId) {
+                  setCurrId(step.activeId);
+                  audio.playStep(nextIdx);
+                }
+                return nextIdx;
+              } else {
+                setIsPlaying(false);
+                if (window._pendingListUpdate) {
+                  window._pendingListUpdate();
+                  window._pendingListUpdate = null;
+                }
+                return prev;
+              }
+            });
+          }, intervalMs);
+        }
+        return () => clearInterval(timer);
+      }, [isPlaying, algoSteps, playbackSpeed]);
+
+      // --- LINKED LIST OPERATIONS ---
+
+      // 1. ADD AT HEAD O(1)
+      const handleAddHead = (formData) => {
+        const newAddress = genAddress();
+        const newNode = {
+          id: 'node-' + Date.now(),
+          address: newAddress,
+          title: formData.title || 'New Head Slide',
+          subtitle: formData.subtitle || 'Inserted at Head O(1)',
+          bullets: formData.bulletsStr ? formData.bulletsStr.split('\n').filter(Boolean) : ['Added at constant time O(1)'],
+          layout: formData.layout || 'standard',
+          color: formData.color || 'amber'
+        };
+
+        const steps = [
+          {
+            op: 'Add Head',
+            title: 'Instantiate New Node',
+            narrative: `Created new Node at heap address ${newAddress} with slide payload.`,
+            bigO: 'O(1)',
+            spaceO: 'O(1)',
+            activeId: null,
+            headAddr: headSlide?.address || 'NULL',
+            tailAddr: tailSlide?.address || 'NULL',
+            currAddr: newAddress,
+            nextAddr: headSlide?.address || 'NULL'
+          },
+          {
+            op: 'Add Head',
+            title: 'Link Node.next = HEAD',
+            narrative: `Set node (${newAddress}).next pointer to point to current HEAD (${headSlide?.address || 'NULL'}).`,
+            bigO: 'O(1)',
+            spaceO: 'O(1)',
+            activeId: null,
+            headAddr: headSlide?.address || 'NULL',
+            tailAddr: tailSlide?.address || 'NULL',
+            currAddr: newAddress,
+            nextAddr: headSlide?.address || 'NULL'
+          },
+          {
+            op: 'Add Head',
+            title: 'Re-assign HEAD Pointer',
+            narrative: `Re-assigned HEAD pointer reference to point directly to new node (${newAddress}). Operation complete in constant O(1) time!`,
+            bigO: 'O(1)',
+            spaceO: 'O(1)',
+            activeId: newNode.id,
+            headAddr: newAddress,
+            tailAddr: tailSlide?.address || newAddress,
+            currAddr: newAddress,
+            nextAddr: headSlide?.address || 'NULL'
+          }
+        ];
+
+        audio.playInsert();
+        triggerAlgorithm(steps, () => {
+          setSlides(prev => [newNode, ...prev]);
+          setCurrId(newNode.id);
+        });
+      };
+
+      // 2. ADD AT TAIL O(1)
+      const handleAddTail = (formData) => {
+        const newAddress = genAddress();
+        const newNode = {
+          id: 'node-' + Date.now(),
+          address: newAddress,
+          title: formData.title || 'New Tail Slide',
+          subtitle: formData.subtitle || 'Inserted at Tail O(1)',
+          bullets: formData.bulletsStr ? formData.bulletsStr.split('\n').filter(Boolean) : ['Constant time tail insertion via tail reference pointer.'],
+          layout: formData.layout || 'standard',
+          color: formData.color || 'sunshine'
+        };
+
+        if (slides.length === 0) {
+          handleAddHead(formData);
+          return;
+        }
+
+        const steps = [
+          {
+            op: 'Add Tail',
+            title: 'Instantiate New Node',
+            narrative: `Created new Node at heap address ${newAddress} holding the slide data.`,
+            bigO: 'O(1)',
+            spaceO: 'O(1)',
+            activeId: tailSlide.id,
+            headAddr: headSlide.address,
+            tailAddr: tailSlide.address,
+            currAddr: tailSlide.address,
+            nextAddr: 'NULL'
+          },
+          {
+            op: 'Add Tail',
+            title: 'Access TAIL Reference O(1)',
+            narrative: `Utilized persistent TAIL pointer reference to reach node at ${tailSlide.address} immediately without list traversal.`,
+            bigO: 'O(1)',
+            spaceO: 'O(1)',
+            activeId: tailSlide.id,
+            headAddr: headSlide.address,
+            tailAddr: tailSlide.address,
+            currAddr: tailSlide.address,
+            nextAddr: newAddress
+          },
+          {
+            op: 'Add Tail',
+            title: 'Update TAIL.next & Re-assign TAIL',
+            narrative: `Set ${tailSlide.address}.next = ${newAddress}, and moved TAIL reference pointer to new node (${newAddress}).`,
+            bigO: 'O(1)',
+            spaceO: 'O(1)',
+            activeId: newNode.id,
+            headAddr: headSlide.address,
+            tailAddr: newAddress,
+            currAddr: newAddress,
+            nextAddr: 'NULL'
+          }
+        ];
+
+        audio.playInsert();
+        triggerAlgorithm(steps, () => {
+          setSlides(prev => [...prev, newNode]);
+          setCurrId(newNode.id);
+        });
+      };
+
+      // 3. INSERT AT POSITION O(n)
+      const handleInsertAtPosition = (pos, formData) => {
+        if (pos <= 0) {
+          handleAddHead(formData);
+          return;
+        }
+        if (pos >= slides.length) {
+          handleAddTail(formData);
+          return;
+        }
+
+        const newAddress = genAddress();
+        const newNode = {
+          id: 'node-' + Date.now(),
+          address: newAddress,
+          title: formData.title || `Inserted Slide (Pos ${pos})`,
+          subtitle: formData.subtitle || `Inserted via O(n) linear traversal`,
+          bullets: formData.bulletsStr ? formData.bulletsStr.split('\n').filter(Boolean) : ['Traversed linearly to index position', 'Updated adjacent node next pointers'],
+          layout: formData.layout || 'standard',
+          color: formData.color || 'terracotta'
+        };
+
+        const steps = [];
+        steps.push({
+          op: `Insert at Index ${pos}`,
+          title: 'Initialize Traversal at HEAD',
+          narrative: `Starting traversal from HEAD (${headSlide.address}) to locate insertion index ${pos - 1}.`,
+          bigO: 'O(n)',
+          spaceO: 'O(1)',
+          activeId: headSlide.id,
+          headAddr: headSlide.address,
+          tailAddr: tailSlide.address,
+          currAddr: headSlide.address,
+          nextAddr: slides[1]?.address || 'NULL'
+        });
+
+        // Traverse to pos - 1
+        for (let i = 0; i < pos; i++) {
+          steps.push({
+            op: `Insert at Index ${pos}`,
+            title: `Traverse Step ${i + 1}/${pos}`,
+            narrative: `Advanced CURR pointer along \`next\` reference to Node ${i} (${slides[i].address}).`,
+            bigO: 'O(n)',
+            spaceO: 'O(1)',
+            activeId: slides[i].id,
+            headAddr: headSlide.address,
+            tailAddr: tailSlide.address,
+            currAddr: slides[i].address,
+            nextAddr: slides[i + 1]?.address || 'NULL'
+          });
+        }
+
+        const predNode = slides[pos - 1];
+        const succNode = slides[pos];
+
+        steps.push({
+          op: `Insert at Index ${pos}`,
+          title: 'Connect New Node.next',
+          narrative: `Instantiated Node at ${newAddress}. Pointed new node's \`next\` to Node at index ${pos} (${succNode.address}).`,
+          bigO: 'O(n)',
+          spaceO: 'O(1)',
+          activeId: predNode.id,
+          headAddr: headSlide.address,
+          tailAddr: tailSlide.address,
+          currAddr: predNode.address,
+          nextAddr: newAddress
+        });
+
+        steps.push({
+          op: `Insert at Index ${pos}`,
+          title: 'Update Predecessor.next Pointer',
+          narrative: `Updated Node ${pos - 1} (${predNode.address}).next pointer to point to new Node (${newAddress}). Insertion complete!`,
+          bigO: 'O(n)',
+          spaceO: 'O(1)',
+          activeId: newNode.id,
+          headAddr: headSlide.address,
+          tailAddr: tailSlide.address,
+          currAddr: newAddress,
+          nextAddr: succNode.address
+        });
+
+        audio.playInsert();
+        triggerAlgorithm(steps, () => {
+          setSlides(prev => {
+            const copy = [...prev];
+            copy.splice(pos, 0, newNode);
+            return copy;
+          });
+          setCurrId(newNode.id);
+        });
+      };
+
+      // 4. REMOVE HEAD O(1)
+      const handleRemoveHead = () => {
+        if (slides.length === 0) return;
+
+        const target = headSlide;
+        const nextHead = slides[1] || null;
+
+        const steps = [
+          {
+            op: 'Remove Head',
+            title: 'Identify Current HEAD',
+            narrative: `Target node to remove is HEAD (${target.address}).`,
+            bigO: 'O(1)',
+            spaceO: 'O(1)',
+            activeId: target.id,
+            headAddr: target.address,
+            tailAddr: tailSlide.address,
+            currAddr: target.address,
+            nextAddr: nextHead?.address || 'NULL'
+          },
+          {
+            op: 'Remove Head',
+            title: 'Advance HEAD Pointer Reference',
+            narrative: `Re-assigned HEAD pointer reference to HEAD.next (${nextHead?.address || 'NULL'}) in constant O(1) time.`,
+            bigO: 'O(1)',
+            spaceO: 'O(1)',
+            activeId: nextHead?.id || null,
+            headAddr: nextHead?.address || 'NULL',
+            tailAddr: nextHead ? tailSlide.address : 'NULL',
+            currAddr: nextHead?.address || 'NULL',
+            nextAddr: slides[2]?.address || 'NULL'
+          },
+          {
+            op: 'Remove Head',
+            title: 'Deallocate Removed Node Memory',
+            narrative: `Disconnected memory address ${target.address}. Heap memory reclaimed.`,
+            bigO: 'O(1)',
+            spaceO: 'O(1)',
+            activeId: nextHead?.id || null,
+            headAddr: nextHead?.address || 'NULL',
+            tailAddr: nextHead ? tailSlide.address : 'NULL',
+            currAddr: nextHead?.address || 'NULL',
+            nextAddr: slides[2]?.address || 'NULL'
+          }
+        ];
+
+        audio.playDelete();
+        triggerAlgorithm(steps, () => {
+          setSlides(prev => prev.slice(1));
+          setCurrId(nextHead?.id || null);
+        });
+      };
+
+      // 5. REMOVE TAIL O(n)
+      const handleRemoveTail = () => {
+        if (slides.length === 0) return;
+        if (slides.length === 1) {
+          handleRemoveHead();
+          return;
+        }
+
+        const steps = [];
+        steps.push({
+          op: 'Remove Tail',
+          title: 'Linear Traversal Required',
+          narrative: `Unlike Add Tail O(1), Remove Tail requires O(n) traversal to find the node at size-2 (index ${slides.length - 2}) because Singly Linked Lists store NO backward pointers!`,
+          bigO: 'O(n)',
+          spaceO: 'O(1)',
+          activeId: headSlide.id,
+          headAddr: headSlide.address,
+          tailAddr: tailSlide.address,
+          currAddr: headSlide.address,
+          nextAddr: slides[1]?.address || 'NULL'
+        });
+
+        for (let i = 0; i < slides.length - 1; i++) {
+          steps.push({
+            op: 'Remove Tail',
+            title: `Traverse Hop ${i + 1}/${slides.length - 1}`,
+            narrative: `Inspecting Node ${i} (${slides[i].address}). Checking if node.next === TAIL (${tailSlide.address})...`,
+            bigO: 'O(n)',
+            spaceO: 'O(1)',
+            activeId: slides[i].id,
+            headAddr: headSlide.address,
+            tailAddr: tailSlide.address,
+            currAddr: slides[i].address,
+            nextAddr: slides[i + 1]?.address || 'NULL'
+          });
+        }
+
+        const newTail = slides[slides.length - 2];
+
+        steps.push({
+          op: 'Remove Tail',
+          title: 'Disconnect TAIL & Re-assign Pointer',
+          narrative: `Found second-to-last node at ${newTail.address}. Set ${newTail.address}.next = NULL and moved TAIL reference pointer to ${newTail.address}.`,
+          bigO: 'O(n)',
+          spaceO: 'O(1)',
+          activeId: newTail.id,
+          headAddr: headSlide.address,
+          tailAddr: newTail.address,
+          currAddr: newTail.address,
+          nextAddr: 'NULL'
+        });
+
+        audio.playDelete();
+        triggerAlgorithm(steps, () => {
+          setSlides(prev => prev.slice(0, prev.length - 1));
+          setCurrId(newTail.id);
+        });
+      };
+
+      // 6. REMOVE AT POSITION O(n)
+      const handleRemoveAtPosition = (pos) => {
+        if (pos <= 0) {
+          handleRemoveHead();
+          return;
+        }
+        if (pos >= slides.length - 1) {
+          handleRemoveTail();
+          return;
+        }
+
+        const steps = [];
+        steps.push({
+          op: `Remove Index ${pos}`,
+          title: 'Start Traversal from HEAD',
+          narrative: `Beginning linear traversal to locate predecessor node at index ${pos - 1}.`,
+          bigO: 'O(n)',
+          spaceO: 'O(1)',
+          activeId: headSlide.id,
+          headAddr: headSlide.address,
+          tailAddr: tailSlide.address,
+          currAddr: headSlide.address,
+          nextAddr: slides[1]?.address || 'NULL'
+        });
+
+        for (let i = 0; i < pos; i++) {
+          steps.push({
+            op: `Remove Index ${pos}`,
+            title: `Traverse Step ${i + 1}`,
+            narrative: `Moved CURR pointer to Node ${i} (${slides[i].address}).`,
+            bigO: 'O(n)',
+            spaceO: 'O(1)',
+            activeId: slides[i].id,
+            headAddr: headSlide.address,
+            tailAddr: tailSlide.address,
+            currAddr: slides[i].address,
+            nextAddr: slides[i + 1]?.address || 'NULL'
+          });
+        }
+
+        const predNode = slides[pos - 1];
+        const targetNode = slides[pos];
+        const succNode = slides[pos + 1];
+
+        steps.push({
+          op: `Remove Index ${pos}`,
+          title: 'Bypass Target Node Pointer',
+          narrative: `Updating Node ${pos - 1} (${predNode.address}).next to bypass Node ${pos} (${targetNode.address}) and point directly to Node ${pos + 1} (${succNode.address}).`,
+          bigO: 'O(n)',
+          spaceO: 'O(1)',
+          activeId: predNode.id,
+          headAddr: headSlide.address,
+          tailAddr: tailSlide.address,
+          currAddr: predNode.address,
+          nextAddr: succNode.address
+        });
+
+        steps.push({
+          op: `Remove Index ${pos}`,
+          title: 'Deallocate Removed Node',
+          narrative: `Node at address ${targetNode.address} disconnected and removed from list memory.`,
+          bigO: 'O(n)',
+          spaceO: 'O(1)',
+          activeId: predNode.id,
+          headAddr: headSlide.address,
+          tailAddr: tailSlide.address,
+          currAddr: predNode.address,
+          nextAddr: succNode.address
+        });
+
+        audio.playDelete();
+        triggerAlgorithm(steps, () => {
+          setSlides(prev => prev.filter((_, idx) => idx !== pos));
+          setCurrId(predNode.id);
+        });
+      };
+
+      // 7. DELETE CURRENT SLIDE
+      const handleDeleteCurrent = () => {
+        if (activeIndex === -1) return;
+        handleRemoveAtPosition(activeIndex);
+      };
+
+      // 8. GET ELEMENT / TRAVERSE TO POSITION O(n)
+      const handleGoToPosition = (targetIdx) => {
+        if (targetIdx < 0 || targetIdx >= slides.length) return;
+        if (targetIdx === activeIndex) return;
+
+        const steps = [];
+        const isForward = targetIdx > activeIndex;
+
+        steps.push({
+          op: `Traverse to Index ${targetIdx}`,
+          title: 'Initiate Traversal',
+          narrative: `Starting sequential search from current position (${slides[activeIndex].address}) through \`next\` pointers.`,
+          bigO: 'O(n)',
+          spaceO: 'O(1)',
+          activeId: slides[activeIndex].id,
+          headAddr: headSlide.address,
+          tailAddr: tailSlide.address,
+          currAddr: slides[activeIndex].address,
+          nextAddr: slides[activeIndex + 1]?.address || 'NULL'
+        });
+
+        if (targetIdx >= activeIndex) {
+          for (let i = activeIndex; i <= targetIdx; i++) {
+            steps.push({
+              op: `Traverse to Index ${targetIdx}`,
+              title: `Inspecting Node ${i}`,
+              narrative: `CURR pointer at address ${slides[i].address} (${slides[i].title}). ${i === targetIdx ? 'Target reached!' : 'Following next pointer...'}`,
+              bigO: 'O(n)',
+              spaceO: 'O(1)',
+              activeId: slides[i].id,
+              headAddr: headSlide.address,
+              tailAddr: tailSlide.address,
+              currAddr: slides[i].address,
+              nextAddr: slides[i + 1]?.address || 'NULL'
+            });
+          }
+        } else {
+          // Backward traversal requires restarting from HEAD in Singly Linked List!
+          steps.push({
+            op: `Traverse to Index ${targetIdx}`,
+            title: 'Restarting from HEAD (Singly Linked List Rule)',
+            narrative: `Cannot move backward directly! Must restart traversal from HEAD (${headSlide.address}) to reach target index ${targetIdx}.`,
+            bigO: 'O(n)',
+            spaceO: 'O(1)',
+            activeId: headSlide.id,
+            headAddr: headSlide.address,
+            tailAddr: tailSlide.address,
+            currAddr: headSlide.address,
+            nextAddr: slides[1]?.address || 'NULL'
+          });
+
+          for (let i = 0; i <= targetIdx; i++) {
+            steps.push({
+              op: `Traverse to Index ${targetIdx}`,
+              title: `Inspecting Node ${i}`,
+              narrative: `CURR pointer at address ${slides[i].address} (${slides[i].title}). ${i === targetIdx ? 'Target reached!' : 'Following next pointer...'}`,
+              bigO: 'O(n)',
+              spaceO: 'O(1)',
+              activeId: slides[i].id,
+              headAddr: headSlide.address,
+              tailAddr: tailSlide.address,
+              currAddr: slides[i].address,
+              nextAddr: slides[i + 1]?.address || 'NULL'
+            });
+          }
+        }
+
+        audio.playClick();
+        triggerAlgorithm(steps, () => {
+          setCurrId(slides[targetIdx].id);
+        });
+      };
+
+      // 9. DIRECT GO HEAD O(1)
+      const handleDirectGoHead = () => {
+        if (!headSlide) return;
+        const steps = [
+          {
+            op: 'Direct Jump HEAD',
+            title: 'Constant Time HEAD Access O(1)',
+            narrative: `Utilized persistent HEAD reference pointer to instantly jump to ${headSlide.address} in constant O(1) time.`,
+            bigO: 'O(1)',
+            spaceO: 'O(1)',
+            activeId: headSlide.id,
+            headAddr: headSlide.address,
+            tailAddr: tailSlide.address,
+            currAddr: headSlide.address,
+            nextAddr: slides[1]?.address || 'NULL'
+          }
+        ];
+        audio.playClick();
+        triggerAlgorithm(steps, () => setCurrId(headSlide.id));
+      };
+
+      // 10. DIRECT GO TAIL O(1)
+      const handleDirectGoTail = () => {
+        if (!tailSlide) return;
+        const steps = [
+          {
+            op: 'Direct Jump TAIL',
+            title: 'Constant Time TAIL Access O(1)',
+            narrative: `Utilized persistent TAIL reference pointer to jump directly to ${tailSlide.address} in constant O(1) time without traversing intermediate nodes!`,
+            bigO: 'O(1)',
+            spaceO: 'O(1)',
+            activeId: tailSlide.id,
+            headAddr: headSlide.address,
+            tailAddr: tailSlide.address,
+            currAddr: tailSlide.address,
+            nextAddr: 'NULL'
+          }
+        ];
+        audio.playClick();
+        triggerAlgorithm(steps, () => setCurrId(tailSlide.id));
+      };
+
+      // 11. EDIT SLIDE DETAILS
+      const handleSaveEditSlide = () => {
+        if (!activeSlide) return;
+        const updated = {
+          ...activeSlide,
+          title: slideFormData.title || activeSlide.title,
+          subtitle: slideFormData.subtitle || activeSlide.subtitle,
+          bullets: slideFormData.bulletsStr ? slideFormData.bulletsStr.split('\n').filter(Boolean) : activeSlide.bullets,
+          layout: slideFormData.layout,
+          color: slideFormData.color
+        };
+
+        setSlides(prev => prev.map(s => s.id === activeSlide.id ? updated : s));
+        setIsEditModalOpen(false);
+        audio.playClick();
+      };
+
+      // Open Edit Modal
+      const openEditModal = () => {
+        if (!activeSlide) return;
+        setSlideFormData({
+          title: activeSlide.title,
+          subtitle: activeSlide.subtitle,
+          bulletsStr: activeSlide.bullets.join('\n'),
+          layout: activeSlide.layout,
+          color: activeSlide.color
+        });
+        setIsEditModalOpen(true);
+      };
+
+      // Blocked Backward Navigation Handler
+      const triggerBackwardWarning = () => {
+        audio.playWarning();
+        setWarningToast({
+          title: 'Backward Traversal Blocked!',
+          message: 'Singly Linked List nodes only store `next` pointers! Backward traversal is impossible without `prev` pointers (Doubly Linked List).'
+        });
+        setTimeout(() => setWarningToast(null), 5000);
+      };
+
+      // Key Listener for Presenter Mode
+      useEffect(() => {
+        const handleKeyDown = (e) => {
+          // Ignore typing in input fields or open modals
+          if (isInsertModalOpen || isEditModalOpen) return;
+          if (['INPUT', 'TEXTAREA'].includes(document.activeElement?.tagName)) return;
+
+          if (isPresenter) {
+            if (e.key === 'ArrowRight' || e.key === ' ' || e.key === 'Enter') {
+              e.preventDefault();
+              if (activeIndex < slides.length - 1) {
+                audio.playStep(activeIndex + 1);
+                setCurrId(slides[activeIndex + 1].id);
+              } else {
+                audio.playClick();
+                setWarningToast({
+                  title: 'End of Linked List',
+                  message: 'Reached TAIL node (`next === NULL`). No further forward slides exist.'
+                });
+                setTimeout(() => setWarningToast(null), 3000);
+              }
+            } else if (e.key === 'ArrowLeft' || e.key === 'Backspace' || e.key === 'ArrowUp') {
+              e.preventDefault();
+              triggerBackwardWarning();
+            } else if (e.key === 'Escape') {
+              setIsPresenter(false);
+            }
+          }
+        };
+
+        window.addEventListener('keydown', handleKeyDown);
+        return () => window.removeEventListener('keydown', handleKeyDown);
+      }, [isPresenter, activeIndex, slides, isInsertModalOpen, isEditModalOpen]);
+
+      // Return Color Tailwind theme classes
+      const getThemeClasses = (colorName) => {
+        switch (colorName) {
+          case 'charcoal':
+            return {
+              bg: 'bg-editorial-text text-cream-100',
+              accent: 'text-sunshine-400',
+              border: 'border-editorial-muted',
+              badge: 'bg-sunshine-500 text-editorial-text'
+            };
+          case 'terracotta':
+            return {
+              bg: 'bg-terracotta-100/60 text-editorial-text',
+              accent: 'text-terracotta-500',
+              border: 'border-terracotta-500/30',
+              badge: 'bg-terracotta-500 text-white'
+            };
+          case 'sage':
+            return {
+              bg: 'bg-emerald-50 text-editorial-text',
+              accent: 'text-emerald-700',
+              border: 'border-emerald-200',
+              badge: 'bg-emerald-700 text-white'
+            };
+          case 'amber':
+          default:
+            return {
+              bg: 'bg-sunshine-50 text-editorial-text',
+              accent: 'text-sunshine-600',
+              border: 'border-sunshine-200',
+              badge: 'bg-sunshine-500 text-editorial-text'
+            };
+        }
+      };
+
+      return (
+        <div className="min-h-screen flex flex-col bg-editorial-bg text-editorial-text selection:bg-sunshine-200">
+          
+          {/* --- TOP HEADER NAVIGATION BAR --- */}
+          <header className="h-16 bg-editorial-surface border-b border-editorial-border px-6 flex items-center justify-between shadow-sm z-20">
+            <div className="flex items-center space-x-3">
+              <div className="w-9 h-9 rounded-xl bg-sunshine-500 flex items-center justify-center font-bold text-editorial-text shadow-sm">
+                LS
+              </div>
+              <div>
+                <h1 className="text-lg font-bold tracking-tight text-editorial-text flex items-center gap-2">
+                  <span>Linked Slides</span>
+                  <span className="text-xs font-mono font-medium px-2 py-0.5 rounded-full bg-cream-200 text-editorial-muted">
+                    SinglyLinkedList Visualizer
+                  </span>
+                </h1>
+              </div>
+            </div>
+
+            {/* Quick Action Toolbar */}
+            <div className="flex items-center space-x-2">
+              <button 
+                onClick={() => setSoundEnabled(!soundEnabled)}
+                className="p-2 rounded-lg border border-editorial-border hover:bg-cream-100 transition text-editorial-muted hover:text-editorial-text"
+                title={soundEnabled ? 'Mute Audio Engine' : 'Enable Audio Engine'}
+              >
+                {soundEnabled ? <IconVolume /> : <IconVolumeMute />}
+              </button>
+
+              <button
+                onClick={handleDirectGoHead}
+                className="px-3 py-1.5 text-xs font-semibold rounded-lg bg-cream-200 hover:bg-cream-300 text-editorial-text transition flex items-center gap-1.5"
+                title="Direct Constant Time O(1) Access"
+              >
+                <span className="w-2 h-2 rounded-full bg-sunshine-500"></span>
+                Go HEAD O(1)
+              </button>
+
+              <button
+                onClick={handleDirectGoTail}
+                className="px-3 py-1.5 text-xs font-semibold rounded-lg bg-cream-200 hover:bg-cream-300 text-editorial-text transition flex items-center gap-1.5"
+                title="Direct Constant Time O(1) Access via Tail Pointer"
+              >
+                <span className="w-2 h-2 rounded-full bg-terracotta-500"></span>
+                Go TAIL O(1)
+              </button>
+
+              <div className="h-4 w-px bg-editorial-border mx-1"></div>
+
+              <button
+                onClick={() => setIsPresenter(true)}
+                className="px-4 py-2 text-xs font-bold rounded-xl bg-editorial-text text-cream-50 hover:bg-black transition flex items-center gap-2 shadow-sm"
+              >
+                <IconPresenter />
+                <span>Presenter Mode</span>
+              </button>
+            </div>
+          </header>
+
+          {/* --- MAIN WORKSPACE GRID LAYOUT --- */}
+          <div className="flex-1 flex flex-col lg:flex-row overflow-hidden">
+            
+            {/* LEFT & CENTER PANEL: MEMORY CANVAS + SLIDE VIEW */}
+            <div className="flex-1 flex flex-col min-w-0 border-r border-editorial-border">
+              
+              {/* --- PANEL A: MEMORY CANVAS (LINKED LIST NODE RIBBON) --- */}
+              <div className="bg-editorial-card border-b border-editorial-border p-4 overflow-x-auto">
+                <div className="flex items-center justify-between mb-3 px-1">
+                  <div className="flex items-center space-x-2">
+                    <IconLayers />
+                    <h2 className="text-xs font-bold uppercase tracking-wider text-editorial-muted">
+                      Heap Memory Node Ribbon ({slides.length} Nodes)
+                    </h2>
+                  </div>
+                  <div className="flex items-center space-x-3 text-xs text-editorial-muted">
+                    <span className="flex items-center gap-1">
+                      <span className="w-2.5 h-2.5 rounded-full bg-sunshine-500 inline-block"></span> HEAD
+                    </span>
+                    <span className="flex items-center gap-1">
+                      <span className="w-2.5 h-2.5 rounded-full bg-terracotta-500 inline-block"></span> TAIL
+                    </span>
+                    <span className="flex items-center gap-1">
+                      <span className="w-2.5 h-2.5 rounded-full bg-editorial-text inline-block"></span> CURR
+                    </span>
+                  </div>
+                </div>
+
+                {/* Node Chain Ribbon */}
+                <div className="flex items-center space-x-2 pb-2 pt-1 min-w-max">
+                  {slides.map((node, idx) => {
+                    const isHead = idx === 0;
+                    const isTail = idx === slides.length - 1;
+                    const isCurr = node.id === currId;
+                    const isStepActive = currentStep?.activeId === node.id;
+
+                    return (
+                      <React.Fragment key={node.id}>
+                        {/* Single Memory Node Box */}
+                        <div 
+                          onClick={() => handleGoToPosition(idx)}
+                          className={`group relative cursor-pointer w-44 rounded-2xl border p-3 bg-editorial-surface transition-all duration-200 ${
+                            isCurr 
+                              ? 'border-sunshine-500 curr-node-glow -translate-y-1' 
+                              : isStepActive 
+                              ? 'border-sunshine-400 bg-sunshine-50/50' 
+                              : 'border-editorial-border hover:border-editorial-borderDark hover:-translate-y-0.5'
+                          }`}
+                        >
+                          {/* Badges for HEAD, TAIL, CURR */}
+                          <div className="flex items-center justify-between mb-1.5 min-h-[22px]">
+                            <span className="font-mono text-[10px] font-bold px-1.5 py-0.5 rounded bg-cream-200 text-editorial-muted">
+                              {node.address}
+                            </span>
+                            <div className="flex items-center space-x-1">
+                              {isHead && (
+                                <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-sunshine-500 text-editorial-text uppercase">
+                                  Head
+                                </span>
+                              )}
+                              {isTail && (
+                                <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-terracotta-500 text-white uppercase">
+                                  Tail
+                                </span>
+                              )}
+                              {isCurr && (
+                                <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-editorial-text text-cream-50 uppercase">
+                                  Curr
+                                </span>
+                              )}
+                            </div>
+                          </div>
+
+                          {/* Node Payload Preview */}
+                          <div className="text-xs font-bold truncate text-editorial-text mb-2">
+                            {idx + 1}. {node.title}
+                          </div>
+
+                          {/* Pointer Section inside Node */}
+                          <div className="grid grid-cols-2 gap-1 bg-cream-100 rounded-lg p-1.5 text-[10px] font-mono border border-editorial-border/60">
+                            <div className="border-r border-editorial-border/60 pr-1">
+                              <span className="text-editorial-subtle block">data</span>
+                              <span className="font-bold text-editorial-text truncate block">
+                                Slide #{idx + 1}
+                              </span>
+                            </div>
+                            <div className="pl-1">
+                              <span className="text-editorial-subtle block">next</span>
+                              <span className="font-bold text-sunshine-700 truncate block">
+                                {isTail ? '0x0000' : slides[idx + 1]?.address}
+                              </span>
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Curved SVG Next Pointer Arrow */}
+                        <div className="flex items-center justify-center px-1 text-editorial-muted">
+                          <svg className="w-8 h-6 text-editorial-borderDark" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                            <path d="M5 12h14M14 5l7 7-7 7" strokeLinecap="round" strokeLinejoin="round"/>
+                          </svg>
+                        </div>
+                      </React.Fragment>
+                    );
+                  })}
+
+                  {/* Grounded NULL Node */}
+                  <div className="w-28 rounded-2xl border border-dashed border-editorial-borderDark bg-cream-200/50 p-3 flex flex-col items-center justify-center text-center">
+                    <span className="font-mono text-xs font-bold text-editorial-subtle">0x0000</span>
+                    <span className="text-xs font-black text-editorial-muted tracking-widest mt-0.5">NULL</span>
+                    <div className="mt-1 border-t-2 border-editorial-muted w-6 pt-0.5 flex flex-col items-center">
+                      <div className="border-t border-editorial-muted w-4 my-0.5"></div>
+                      <div className="border-t border-editorial-muted w-2"></div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* --- PANEL B: SLIDE VIEW & EDITOR STAGE --- */}
+              <div className="flex-1 p-6 flex flex-col items-center justify-center bg-editorial-bg overflow-y-auto">
+                
+                {/* Operations Toolbar */}
+                <div className="w-full max-w-3xl mb-4 flex flex-wrap items-center justify-between gap-2 bg-editorial-surface p-2 rounded-2xl border border-editorial-border shadow-sm">
+                  <div className="flex items-center space-x-1">
+                    <button
+                      onClick={() => {
+                        setInsertPos('head');
+                        setSlideFormData({ title: '', subtitle: '', bulletsStr: '', layout: 'standard', color: 'amber' });
+                        setIsInsertModalOpen(true);
+                      }}
+                      className="px-3 py-1.5 text-xs font-semibold rounded-xl bg-sunshine-100 hover:bg-sunshine-200 text-sunshine-700 transition flex items-center gap-1"
+                    >
+                      <IconPlus /> Add Head O(1)
+                    </button>
+
+                    <button
+                      onClick={() => {
+                        setInsertPos('tail');
+                        setSlideFormData({ title: '', subtitle: '', bulletsStr: '', layout: 'standard', color: 'sunshine' });
+                        setIsInsertModalOpen(true);
+                      }}
+                      className="px-3 py-1.5 text-xs font-semibold rounded-xl bg-sunshine-500 hover:bg-sunshine-600 text-editorial-text transition flex items-center gap-1 font-medium"
+                    >
+                      <IconPlus /> Add Tail O(1)
+                    </button>
+
+                    <button
+                      onClick={() => {
+                        setInsertPos('pos');
+                        setSlideFormData({ title: '', subtitle: '', bulletsStr: '', layout: 'standard', color: 'terracotta' });
+                        setIsInsertModalOpen(true);
+                      }}
+                      className="px-3 py-1.5 text-xs font-semibold rounded-xl bg-cream-200 hover:bg-cream-300 text-editorial-text transition flex items-center gap-1"
+                    >
+                      <IconPlus /> Insert At Index O(n)
+                    </button>
+                  </div>
+
+                  <div className="flex items-center space-x-1">
+                    <button
+                      onClick={openEditModal}
+                      disabled={!activeSlide}
+                      className="px-3 py-1.5 text-xs font-semibold rounded-xl border border-editorial-border hover:bg-cream-100 text-editorial-text transition flex items-center gap-1 disabled:opacity-40"
+                    >
+                      <IconEdit /> Edit Slide
+                    </button>
+
+                    <button
+                      onClick={handleDeleteCurrent}
+                      disabled={!activeSlide}
+                      className="px-3 py-1.5 text-xs font-semibold rounded-xl bg-red-50 hover:bg-red-100 text-red-600 transition flex items-center gap-1 disabled:opacity-40"
+                    >
+                      <IconTrash /> Delete Current O(n)
+                    </button>
+                  </div>
+                </div>
+
+                {/* Current Slide Display Canvas */}
+                {activeSlide ? (
+                  <div className="w-full max-w-3xl aspect-[16/9] rounded-3xl border border-editorial-border bg-editorial-surface shadow-md p-8 md:p-12 flex flex-col justify-between relative slide-fade-enter">
+                    
+                    {/* Slide Top Metadata Bar */}
+                    <div className="flex items-center justify-between border-b border-editorial-border/60 pb-4">
+                      <div className="flex items-center space-x-2">
+                        <span className="font-serif-editorial italic text-xl text-sunshine-600 font-bold">
+                          Slide #{activeIndex + 1}
+                        </span>
+                        <span className="text-xs font-mono px-2 py-0.5 rounded-full bg-cream-200 text-editorial-muted">
+                          Addr: {activeSlide.address}
+                        </span>
+                      </div>
+
+                      <div className="flex items-center space-x-2">
+                        <span className="text-xs font-mono text-editorial-subtle">
+                          next: {slides[activeIndex + 1]?.address || '0x0000 (NULL)'}
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* Slide Main Body Content Render */}
+                    <div className="my-auto py-4">
+                      {activeSlide.layout === 'title' ? (
+                        <div className="text-center space-y-4">
+                          <h2 className="text-3xl md:text-5xl font-serif-editorial font-bold text-editorial-text tracking-tight leading-tight">
+                            {activeSlide.title}
+                          </h2>
+                          <p className="text-base md:text-xl text-editorial-muted max-w-xl mx-auto font-light">
+                            {activeSlide.subtitle}
+                          </p>
+                        </div>
+                      ) : activeSlide.layout === 'quote' ? (
+                        <div className="space-y-4 border-l-4 border-sunshine-500 pl-6 py-2">
+                          <blockquote className="text-2xl md:text-3xl font-serif-editorial italic text-editorial-text leading-snug">
+                            "{activeSlide.title}"
+                          </blockquote>
+                          <p className="text-sm font-semibold text-editorial-muted tracking-wide uppercase">
+                            — {activeSlide.subtitle}
+                          </p>
+                        </div>
+                      ) : (
+                        <div className="space-y-4">
+                          <h2 className="text-2xl md:text-3xl font-serif-editorial font-bold text-editorial-text leading-snug">
+                            {activeSlide.title}
+                          </h2>
+                          <p className="text-sm text-editorial-muted font-medium">
+                            {activeSlide.subtitle}
+                          </p>
+                          <ul className="space-y-2 mt-4">
+                            {activeSlide.bullets.map((bullet, idx) => (
+                              <li key={idx} className="flex items-start space-x-3 text-sm text-editorial-text">
+                                <span className="w-1.5 h-1.5 rounded-full bg-sunshine-500 mt-2 shrink-0"></span>
+                                <span>{bullet}</span>
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Slide Footer */}
+                    <div className="flex items-center justify-between pt-4 border-t border-editorial-border/60 text-xs text-editorial-subtle">
+                      <span>Singly Linked List Slide Deck</span>
+                      <span>Index {activeIndex} of {slides.length - 1}</span>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="w-full max-w-3xl aspect-[16/9] rounded-3xl border border-dashed border-editorial-borderDark bg-editorial-card flex flex-col items-center justify-center p-8 text-center">
+                    <IconLayers />
+                    <h3 className="text-lg font-bold text-editorial-text mt-2">Linked List Is Empty</h3>
+                    <p className="text-xs text-editorial-muted max-w-sm mt-1">
+                      There are no slide nodes in heap memory. Click "Add Head" or "Add Tail" to initialize the list.
+                    </p>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* --- PANEL C: OPERATION & ALGORITHMIC INSPECTOR --- */}
+            <div className="w-full lg:w-96 bg-editorial-surface border-l border-editorial-border p-6 flex flex-col justify-between overflow-y-auto">
+              
+              <div className="space-y-6">
+                {/* Inspector Header */}
+                <div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-bold uppercase tracking-wider text-editorial-muted flex items-center gap-1.5">
+                      <IconZap /> Algorithmic Inspector
+                    </span>
+                    <span className="text-xs font-mono px-2 py-0.5 rounded-md bg-sunshine-100 text-sunshine-700 font-semibold">
+                      {currentStep ? currentStep.bigO : 'O(1) / O(n)'}
+                    </span>
+                  </div>
+                  <h3 className="text-xl font-serif-editorial font-bold text-editorial-text mt-1">
+                    {currentStep ? currentStep.op : 'Ready for Operations'}
+                  </h3>
+                </div>
+
+                {/* Big-O Metrics & Step Progress */}
+                <div className="grid grid-cols-2 gap-2 bg-cream-100 p-3 rounded-2xl border border-editorial-border">
+                  <div>
+                    <span className="text-[10px] text-editorial-subtle font-semibold uppercase block">Time Complexity</span>
+                    <span className="text-sm font-bold font-mono text-editorial-text">
+                      {currentStep ? currentStep.bigO : 'O(1) / O(n)'}
+                    </span>
+                  </div>
+                  <div>
+                    <span className="text-[10px] text-editorial-subtle font-semibold uppercase block">Space Complexity</span>
+                    <span className="text-sm font-bold font-mono text-editorial-text">
+                      {currentStep ? currentStep.spaceO : 'O(1)'}
+                    </span>
+                  </div>
+                </div>
+
+                {/* Step Narrative Explanation Box (NO RAW CODE) */}
+                <div className="rounded-2xl border border-editorial-border bg-editorial-card p-4 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-bold text-editorial-text">
+                      {currentStep ? currentStep.title : 'Operation Step Narrative'}
+                    </span>
+                    <span className="text-[10px] font-mono text-editorial-muted">
+                      {algoSteps.length > 0 ? `Step ${currentStepIdx + 1}/${algoSteps.length}` : 'Idle'}
+                    </span>
+                  </div>
+                  <p className="text-xs text-editorial-muted leading-relaxed">
+                    {currentStep ? currentStep.narrative : 'Select an operation (Add Head, Add Tail, Remove Tail, etc.) to view plain-English step-by-step traversal mechanics and pointer mutations.'}
+                  </p>
+                </div>
+
+                {/* Pointer State Watchers Table */}
+                <div className="space-y-2">
+                  <h4 className="text-xs font-bold uppercase tracking-wider text-editorial-muted">
+                    Active Pointer Watchers
+                  </h4>
+                  <div className="space-y-2 font-mono text-xs">
+                    <div className="flex items-center justify-between p-2.5 rounded-xl bg-cream-100 border border-editorial-border">
+                      <span className="font-bold text-sunshine-700 flex items-center gap-1">
+                        <span className="w-2 h-2 rounded-full bg-sunshine-500"></span> HEAD
+                      </span>
+                      <span className="font-semibold text-editorial-text">
+                        {currentStep ? currentStep.headAddr : (headSlide?.address || 'NULL')}
+                      </span>
+                    </div>
+
+                    <div className="flex items-center justify-between p-2.5 rounded-xl bg-cream-100 border border-editorial-border">
+                      <span className="font-bold text-terracotta-500 flex items-center gap-1">
+                        <span className="w-2 h-2 rounded-full bg-terracotta-500"></span> TAIL
+                      </span>
+                      <span className="font-semibold text-editorial-text">
+                        {currentStep ? currentStep.tailAddr : (tailSlide?.address || 'NULL')}
+                      </span>
+                    </div>
+
+                    <div className="flex items-center justify-between p-2.5 rounded-xl bg-cream-100 border border-editorial-border">
+                      <span className="font-bold text-editorial-text flex items-center gap-1">
+                        <span className="w-2 h-2 rounded-full bg-editorial-text"></span> CURR
+                      </span>
+                      <span className="font-semibold text-editorial-text">
+                        {currentStep ? currentStep.currAddr : (activeSlide?.address || 'NULL')}
+                      </span>
+                    </div>
+
+                    <div className="flex items-center justify-between p-2.5 rounded-xl bg-cream-100 border border-editorial-border">
+                      <span className="font-bold text-editorial-subtle flex items-center gap-1">
+                        <span className="w-2 h-2 rounded-full bg-editorial-subtle"></span> NEXT
+                      </span>
+                      <span className="font-semibold text-editorial-text">
+                        {currentStep ? currentStep.nextAddr : (slides[activeIndex + 1]?.address || 'NULL')}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Playback Step Control Bar */}
+              <div className="pt-6 border-t border-editorial-border space-y-3">
+                <div className="flex items-center justify-between text-xs text-editorial-muted">
+                  <span>Playback Speed</span>
+                  <div className="flex items-center space-x-1">
+                    {[0.5, 1, 2, 4].map(spd => (
+                      <button
+                        key={spd}
+                        onClick={() => setPlaybackSpeed(spd)}
+                        className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                          playbackSpeed === spd 
+                            ? 'bg-editorial-text text-cream-50' 
+                            : 'bg-cream-200 text-editorial-muted hover:bg-cream-300'
+                        }`}
+                      >
+                        {spd}x
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="flex items-center justify-center space-x-2">
+                  <button
+                    onClick={() => {
+                      if (currentStepIdx > 0) {
+                        setCurrentStepIdx(prev => prev - 1);
+                        const prevStep = algoSteps[currentStepIdx - 1];
+                        if (prevStep?.activeId) setCurrId(prevStep.activeId);
+                      }
+                    }}
+                    disabled={currentStepIdx <= 0}
+                    className="p-2 rounded-xl border border-editorial-border bg-editorial-surface hover:bg-cream-100 transition disabled:opacity-40"
+                    title="Previous Step"
+                  >
+                    <IconStepBack />
+                  </button>
+
+                  <button
+                    onClick={() => setIsPlaying(!isPlaying)}
+                    disabled={algoSteps.length === 0}
+                    className="px-6 py-2.5 rounded-xl bg-sunshine-500 hover:bg-sunshine-600 text-editorial-text font-bold text-xs flex items-center gap-2 shadow-sm transition disabled:opacity-40"
+                  >
+                    {isPlaying ? <IconPause /> : <IconPlay />}
+                    <span>{isPlaying ? 'Pause' : 'Play Step Animation'}</span>
+                  </button>
+
+                  <button
+                    onClick={() => {
+                      if (currentStepIdx < algoSteps.length - 1) {
+                        setCurrentStepIdx(prev => prev + 1);
+                        const nextStep = algoSteps[currentStepIdx + 1];
+                        if (nextStep?.activeId) setCurrId(nextStep.activeId);
+                      }
+                    }}
+                    disabled={currentStepIdx >= algoSteps.length - 1}
+                    className="p-2 rounded-xl border border-editorial-border bg-editorial-surface hover:bg-cream-100 transition disabled:opacity-40"
+                    title="Next Step"
+                  >
+                    <IconStepForward />
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* --- FULLSCREEN PRESENTER MODE OVERLAY --- */}
+          {isPresenter && (
+            <div className="fixed inset-0 z-50 bg-editorial-bg flex flex-col justify-between p-6 md:p-12 animate-fadeIn">
+              
+              {/* Presenter Mode Top Control Bar */}
+              <div className="flex items-center justify-between">
+                <div className="flex items-center space-x-3">
+                  <span className="font-serif-editorial font-bold text-xl text-editorial-text">
+                    Presenter View
+                  </span>
+                  <span className="text-xs font-mono px-2.5 py-1 rounded-full bg-cream-200 text-editorial-muted">
+                    Slide {activeIndex + 1} of {slides.length}
+                  </span>
+                </div>
+
+                <div className="flex items-center space-x-2">
+                  <button
+                    onClick={handleDirectGoHead}
+                    className="px-3 py-1.5 text-xs font-semibold rounded-lg bg-cream-200 hover:bg-cream-300 text-editorial-text transition"
+                  >
+                    Go HEAD O(1)
+                  </button>
+                  <button
+                    onClick={handleDirectGoTail}
+                    className="px-3 py-1.5 text-xs font-semibold rounded-lg bg-cream-200 hover:bg-cream-300 text-editorial-text transition"
+                  >
+                    Go TAIL O(1)
+                  </button>
+                  <button
+                    onClick={() => setIsPresenter(false)}
+                    className="px-4 py-2 text-xs font-bold rounded-xl bg-editorial-text text-cream-50 hover:bg-black transition flex items-center gap-1.5"
+                  >
+                    <IconX /> Exit Presenter
+                  </button>
+                </div>
+              </div>
+
+              {/* Slide Body Stage */}
+              {activeSlide && (
+                <div className="max-w-4xl w-full mx-auto my-auto aspect-[16/9] rounded-3xl border border-editorial-border bg-editorial-surface p-12 shadow-2xl flex flex-col justify-between">
+                  <div>
+                    <span className="text-xs font-mono text-sunshine-700 font-bold uppercase tracking-wider block mb-2">
+                      Heap Address: {activeSlide.address}
+                    </span>
+                    <h2 className="text-4xl md:text-6xl font-serif-editorial font-bold text-editorial-text leading-tight mb-4">
+                      {activeSlide.title}
+                    </h2>
+                    <p className="text-lg text-editorial-muted mb-8">
+                      {activeSlide.subtitle}
+                    </p>
+                    <ul className="space-y-3">
+                      {activeSlide.bullets.map((b, i) => (
+                        <li key={i} className="flex items-start space-x-3 text-base text-editorial-text">
+                          <span className="w-2 h-2 rounded-full bg-sunshine-500 mt-2 shrink-0"></span>
+                          <span>{b}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+
+                  <div className="flex items-center justify-between border-t border-editorial-border/60 pt-4 text-xs font-mono text-editorial-subtle">
+                    <span>Singly Linked List (`next` pointer model)</span>
+                    <span>NEXT Address: {slides[activeIndex + 1]?.address || '0x0000 (NULL)'}</span>
+                  </div>
+                </div>
+              )}
+
+              {/* Presenter Footer Navigation Bar */}
+              <div className="flex items-center justify-between max-w-4xl w-full mx-auto">
+                <div className="text-xs text-editorial-muted flex items-center gap-2">
+                  <IconLock />
+                  <span>Backward navigation blocked (No `prev` pointer in Singly Linked List)</span>
+                </div>
+
+                <div className="flex items-center space-x-3">
+                  <button
+                    onClick={() => {
+                      if (activeIndex < slides.length - 1) {
+                        setCurrId(slides[activeIndex + 1].id);
+                        audio.playStep(activeIndex + 1);
+                      } else {
+                        audio.playClick();
+                      }
+                    }}
+                    disabled={activeIndex >= slides.length - 1}
+                    className="px-6 py-3 rounded-2xl bg-sunshine-500 hover:bg-sunshine-600 text-editorial-text font-bold text-sm flex items-center gap-2 shadow-md transition disabled:opacity-40"
+                  >
+                    <span>Next Slide</span>
+                    <IconArrowRight />
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* --- EDUCATIONAL TOAST WARNING OVERLAY --- */}
+          {warningToast && (
+            <div className="fixed bottom-6 right-6 z-50 max-w-md bg-editorial-text text-cream-50 p-5 rounded-2xl shadow-2xl border border-sunshine-500/40 animate-slideUp">
+              <div className="flex items-start space-x-3">
+                <div className="p-2 rounded-xl bg-sunshine-500 text-editorial-text shrink-0 mt-0.5">
+                  <IconInfo />
+                </div>
+                <div>
+                  <h4 className="text-sm font-bold text-sunshine-400">
+                    {warningToast.title}
+                  </h4>
+                  <p className="text-xs text-cream-200 mt-1 leading-relaxed">
+                    {warningToast.message}
+                  </p>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* --- INSERT SLIDE MODAL --- */}
+          {isInsertModalOpen && (
+            <div className="fixed inset-0 z-50 bg-black/40 backdrop-blur-sm flex items-center justify-center p-4">
+              <div className="bg-editorial-surface rounded-3xl border border-editorial-border max-w-md w-full p-6 space-y-4 shadow-2xl">
+                <div className="flex items-center justify-between border-b border-editorial-border pb-3">
+                  <h3 className="text-lg font-serif-editorial font-bold text-editorial-text">
+                    Insert New Slide Node
+                  </h3>
+                  <button onClick={() => setIsInsertModalOpen(false)} className="text-editorial-muted hover:text-editorial-text">
+                    <IconX />
+                  </button>
+                </div>
+
+                <div className="space-y-3 text-xs">
+                  <div>
+                    <label className="block font-bold text-editorial-muted mb-1">Insertion Strategy</label>
+                    <div className="grid grid-cols-3 gap-2">
+                      <button
+                        onClick={() => setInsertPos('head')}
+                        className={`p-2 rounded-xl font-bold border ${insertPos === 'head' ? 'bg-sunshine-500 text-editorial-text border-sunshine-600' : 'bg-cream-100 border-editorial-border'}`}
+                      >
+                        Head O(1)
+                      </button>
+                      <button
+                        onClick={() => setInsertPos('tail')}
+                        className={`p-2 rounded-xl font-bold border ${insertPos === 'tail' ? 'bg-sunshine-500 text-editorial-text border-sunshine-600' : 'bg-cream-100 border-editorial-border'}`}
+                      >
+                        Tail O(1)
+                      </button>
+                      <button
+                        onClick={() => setInsertPos('pos')}
+                        className={`p-2 rounded-xl font-bold border ${insertPos === 'pos' ? 'bg-sunshine-500 text-editorial-text border-sunshine-600' : 'bg-cream-100 border-editorial-border'}`}
+                      >
+                        Index O(n)
+                      </button>
+                    </div>
+                  </div>
+
+                  {insertPos === 'pos' && (
+                    <div>
+                      <label className="block font-bold text-editorial-muted mb-1">Target Index Position</label>
+                      <input
+                        type="number"
+                        min="0"
+                        max={slides.length}
+                        value={customPosInput}
+                        onChange={(e) => setCustomPosInput(parseInt(e.target.value) || 0)}
+                        className="w-full p-2.5 rounded-xl border border-editorial-border bg-cream-50 font-mono text-sm focus:outline-none focus:ring-2 focus:ring-sunshine-500"
+                      />
+                    </div>
+                  )}
+
+                  <div>
+                    <label className="block font-bold text-editorial-muted mb-1">Slide Title</label>
+                    <input
+                      type="text"
+                      placeholder="e.g. Asymptotic Complexity"
+                      value={slideFormData.title}
+                      onChange={(e) => setSlideFormData({ ...slideFormData, title: e.target.value })}
+                      className="w-full p-2.5 rounded-xl border border-editorial-border bg-cream-50 text-sm focus:outline-none focus:ring-2 focus:ring-sunshine-500"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block font-bold text-editorial-muted mb-1">Subtitle</label>
+                    <input
+                      type="text"
+                      placeholder="e.g. Key memory tradeoffs"
+                      value={slideFormData.subtitle}
+                      onChange={(e) => setSlideFormData({ ...slideFormData, subtitle: e.target.value })}
+                      className="w-full p-2.5 rounded-xl border border-editorial-border bg-cream-50 text-sm focus:outline-none focus:ring-2 focus:ring-sunshine-500"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block font-bold text-editorial-muted mb-1">Bullet Points (one per line)</label>
+                    <textarea
+                      rows="3"
+                      placeholder="First point&#10;Second point"
+                      value={slideFormData.bulletsStr}
+                      onChange={(e) => setSlideFormData({ ...slideFormData, bulletsStr: e.target.value })}
+                      className="w-full p-2.5 rounded-xl border border-editorial-border bg-cream-50 text-sm focus:outline-none focus:ring-2 focus:ring-sunshine-500"
+                    ></textarea>
+                  </div>
+                </div>
+
+                <div className="pt-3 border-t border-editorial-border flex items-center justify-end space-x-2">
+                  <button
+                    onClick={() => setIsInsertModalOpen(false)}
+                    className="px-4 py-2 rounded-xl text-xs font-semibold bg-cream-200 text-editorial-text hover:bg-cream-300"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={() => {
+                      setIsInsertModalOpen(false);
+                      if (insertPos === 'head') handleAddHead(slideFormData);
+                      else if (insertPos === 'tail') handleAddTail(slideFormData);
+                      else handleInsertAtPosition(customPosInput, slideFormData);
+                    }}
+                    className="px-5 py-2 rounded-xl text-xs font-bold bg-sunshine-500 text-editorial-text hover:bg-sunshine-600 shadow-sm"
+                  >
+                    Execute Insertion
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* --- EDIT SLIDE MODAL --- */}
+          {isEditModalOpen && (
+            <div className="fixed inset-0 z-50 bg-black/40 backdrop-blur-sm flex items-center justify-center p-4">
+              <div className="bg-editorial-surface rounded-3xl border border-editorial-border max-w-md w-full p-6 space-y-4 shadow-2xl">
+                <div className="flex items-center justify-between border-b border-editorial-border pb-3">
+                  <h3 className="text-lg font-serif-editorial font-bold text-editorial-text">
+                    Edit Slide Node Payload
+                  </h3>
+                  <button onClick={() => setIsEditModalOpen(false)} className="text-editorial-muted hover:text-editorial-text">
+                    <IconX />
+                  </button>
+                </div>
+
+                <div className="space-y-3 text-xs">
+                  <div>
+                    <label className="block font-bold text-editorial-muted mb-1">Slide Title</label>
+                    <input
+                      type="text"
+                      value={slideFormData.title}
+                      onChange={(e) => setSlideFormData({ ...slideFormData, title: e.target.value })}
+                      className="w-full p-2.5 rounded-xl border border-editorial-border bg-cream-50 text-sm focus:outline-none focus:ring-2 focus:ring-sunshine-500"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block font-bold text-editorial-muted mb-1">Subtitle</label>
+                    <input
+                      type="text"
+                      value={slideFormData.subtitle}
+                      onChange={(e) => setSlideFormData({ ...slideFormData, subtitle: e.target.value })}
+                      className="w-full p-2.5 rounded-xl border border-editorial-border bg-cream-50 text-sm focus:outline-none focus:ring-2 focus:ring-sunshine-500"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block font-bold text-editorial-muted mb-1">Bullet Points (one per line)</label>
+                    <textarea
+                      rows="4"
+                      value={slideFormData.bulletsStr}
+                      onChange={(e) => setSlideFormData({ ...slideFormData, bulletsStr: e.target.value })}
+                      className="w-full p-2.5 rounded-xl border border-editorial-border bg-cream-50 text-sm focus:outline-none focus:ring-2 focus:ring-sunshine-500"
+                    ></textarea>
+                  </div>
+                </div>
+
+                <div className="pt-3 border-t border-editorial-border flex items-center justify-end space-x-2">
+                  <button
+                    onClick={() => setIsEditModalOpen(false)}
+                    className="px-4 py-2 rounded-xl text-xs font-semibold bg-cream-200 text-editorial-text hover:bg-cream-300"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={handleSaveEditSlide}
+                    className="px-5 py-2 rounded-xl text-xs font-bold bg-editorial-text text-cream-50 hover:bg-black shadow-sm"
+                  >
+                    Save Changes
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+        </div>
+      );
+    }
+
+    // Render App
+    const root = ReactDOM.createRoot(document.getElementById('root'));
+    root.render(<LinkedSlidesApp />);
+  </script>
+</body>
+</html>
